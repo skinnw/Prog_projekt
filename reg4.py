@@ -29,9 +29,19 @@ def init_db():
         "name TEXT, "
         "category TEXT, "
         "quantity INTEGER, "
+        "weight REAL, "
+        "weight_unit TEXT, "
         "exp_date DATE, "
         "FOREIGN KEY(user_id) REFERENCES Users(id))"
     )
+
+    cursor.execute("PRAGMA table_info(Inventory)")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+    if 'weight' not in existing_columns:
+        cursor.execute("ALTER TABLE Inventory ADD COLUMN weight REAL")
+    if 'weight_unit' not in existing_columns:
+        cursor.execute("ALTER TABLE Inventory ADD COLUMN weight_unit TEXT")
+
     conn.commit()
     conn.close()
 
@@ -49,6 +59,15 @@ def center_window(window, width, height):
 def is_valid_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
+
+def is_strong_password(password):
+    return (
+        len(password) >= 8 and
+        re.search(r'[A-Z]', password) and
+        re.search(r'[a-z]', password) and
+        re.search(r'[0-9]', password) and
+        re.search(r'[^\w\s]', password)
+    )
 
 class App(tk.Tk):
     def __init__(self):
@@ -121,18 +140,79 @@ class SignUpFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self.requirements_visible = False
+        self.req_labels = []
         content = tk.Frame(self)
         content.place(relx=0.5, rely=0.5, anchor="center")
         tk.Label(content, text="REĢISTRĀCIJA", font=("Arial", 16, "bold")).pack(pady=20) 
         tk.Label(content, text="LIETOTĀJVĀRDS").pack()
-        self.entry_user = tk.Entry(content, width=35); self.entry_user.pack(pady=5)
+        self.entry_user = tk.Entry(content, width=35)
+        self.entry_user.pack(pady=5)
+
         tk.Label(content, text="PAROLE").pack()
-        self.entry_pass = tk.Entry(content, show="*", width=35); self.entry_pass.pack(pady=5)
-        tk.Label(content, text="APSTIPRINĀT PAROLI").pack()
-        self.entry_pass_conf = tk.Entry(content, show="*", width=35); self.entry_pass_conf.pack(pady=5)
-        tk.Button(content, text="REĢISTRĒTIES", bg="#2196F3", fg="white", 
+        self.entry_pass = tk.Entry(content, show="*", width=35)
+        self.entry_pass.pack(pady=5)
+        self.entry_pass.bind("<KeyRelease>", lambda event: self.update_password_requirements())
+
+        self.req_frame = tk.Frame(content)
+        self.req_length = tk.Label(self.req_frame, text="• Vismaz 8 rakstzīmes", fg="red", anchor="w", font=("Arial", 9))
+        self.req_upper = tk.Label(self.req_frame, text="• Vismaz 1 lielais burts", fg="red", anchor="w", font=("Arial", 9))
+        self.req_lower = tk.Label(self.req_frame, text="• Vismaz 1 mazais burts", fg="red", anchor="w", font=("Arial", 9))
+        self.req_digit = tk.Label(self.req_frame, text="• Vismaz 1 cipars", fg="red", anchor="w", font=("Arial", 9))
+        self.req_symbol = tk.Label(self.req_frame, text="• Vismaz 1 simbols", fg="red", anchor="w", font=("Arial", 9))
+        self.req_labels = [self.req_length, self.req_upper, self.req_lower, self.req_digit, self.req_symbol]
+        for lbl in self.req_labels:
+            lbl.pack(anchor="w")
+
+        self.confirm_label = tk.Label(content, text="APSTIPRINĀT PAROLI")
+        self.confirm_label.pack()
+        self.entry_pass_conf = tk.Entry(content, show="*", width=35)
+        self.entry_pass_conf.pack(pady=5)
+        self.entry_pass_conf.bind("<KeyRelease>", lambda event: self.update_password_requirements())
+
+        self.password_match_label = tk.Label(content, text="", fg="red", anchor="w", font=("Arial", 9))
+        self.password_match_label.pack(anchor="w", pady=(0, 10))
+
+        tk.Button(content, text="REĢISTRĒTIES", bg="#2196F3", fg="white",
                   command=self.signup, width=25, pady=10).pack(pady=15)
         tk.Button(content, text="Atpakaļ uz pieteikšanos", command=lambda: controller.show_frame(LoginFrame), borderwidth=0).pack()
+
+        self.hide_password_requirements()
+
+    def show_password_requirements(self):
+        if not self.requirements_visible:
+            self.req_frame.pack(fill="x", pady=(0, 10), before=self.confirm_label)
+            self.requirements_visible = True
+        self.update_password_requirements(show=True)
+
+    def hide_password_requirements(self):
+        if self.requirements_visible:
+            self.req_frame.pack_forget()
+        self.requirements_visible = False
+        self.password_match_label.config(text="", fg="red")
+
+    def update_password_requirements(self, show=False):
+        if not self.requirements_visible and not show:
+            return
+        pwd = self.entry_pass.get()
+        pwd2 = self.entry_pass_conf.get()
+        checks = {
+            self.req_length: len(pwd) >= 8,
+            self.req_upper: re.search(r'[A-Z]', pwd) is not None,
+            self.req_lower: re.search(r'[a-z]', pwd) is not None,
+            self.req_digit: re.search(r'[0-9]', pwd) is not None,
+            self.req_symbol: re.search(r'[^\w\s]', pwd) is not None,
+        }
+        for label, valid in checks.items():
+            label.config(fg="green" if valid else "red")
+
+        if pwd2:
+            if pwd == pwd2:
+                self.password_match_label.config(text="Paroles sakrīt.", fg="green")
+            else:
+                self.password_match_label.config(text="Paroles nesakrīt!", fg="red")
+        else:
+            self.password_match_label.config(text="", fg="red")
 
     def signup(self):
         user = self.entry_user.get().strip()
@@ -141,9 +221,27 @@ class SignUpFrame(tk.Frame):
         if not user or not pwd or not pwd2:
             messagebox.showwarning("Brīdinājums", "Visi lauki ir obligāti!")
             return
+
+        password_valid = is_strong_password(pwd)
+        if not password_valid:
+            self.show_password_requirements()
+        else:
+            self.hide_password_requirements()
+
+        if pwd2:
+            if pwd == pwd2:
+                self.password_match_label.config(text="Paroles sakrīt.", fg="green")
+            else:
+                self.password_match_label.config(text="Paroles nesakrīt!", fg="red")
+        else:
+            self.password_match_label.config(text="", fg="red")
+
         if pwd != pwd2:
-            messagebox.showerror("Kļūda", "Paroles nesakrīt!")
+            self.show_password_requirements()
             return
+        if not password_valid:
+            return
+
         try:
             with sqlite3.connect('produkti.db') as conn:
                 cursor = conn.cursor()
@@ -177,7 +275,7 @@ class MainFrame(tk.Frame):
         self.status_sad = tk.PhotoImage(file=os.path.join(base_path, "white_frowning_face.png")).subsample(3, 3)
         self.status_unknown = self.status_neutral
 
-        columns = ("name", "qty", "exp", "type")
+        columns = ("name", "qty", "weight", "exp", "type")
         self.tree = ttk.Treeview(self, columns=columns, show="tree headings")
         self.tree.heading("#0", text="STATUSS")
         self.tree.column("#0", width=120, anchor="center", stretch=False)
@@ -186,7 +284,7 @@ class MainFrame(tk.Frame):
         self.tree.tag_configure('status_bad', background='#f8d0d4')
         self.tree.tag_configure('status_unknown', background='#e8e8e8')
 
-        for col, text in (("name", "PRODUKTS"), ("qty", "SKAITS"), ("exp", "TERMIŅŠ"), ("type", "VIETA")):
+        for col, text in (("name", "PRODUKTS"), ("qty", "SKAITS"), ("weight", "SVARS"), ("exp", "TERMIŅŠ"), ("type", "VIETA")):
             self.tree.heading(col, text=text, command=lambda c=col: self.sort_column(c, False))
 
         self.tree.pack(fill="both", expand=True, padx=20, pady=20)
@@ -197,8 +295,8 @@ class MainFrame(tk.Frame):
         three_days_later = today + timedelta(days=3)
         with sqlite3.connect('produkti.db') as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, quantity, exp_date, category FROM Inventory WHERE user_id=?", (self.controller.current_user_id,))
-            for item_id, name, qty, exp_date, category in cursor.fetchall():
+            cursor.execute("SELECT id, name, quantity, exp_date, category, weight, weight_unit FROM Inventory WHERE user_id=?", (self.controller.current_user_id,))
+            for item_id, name, qty, exp_date, category, weight, weight_unit in cursor.fetchall():
                 try:
                     exp_date_dt = datetime.datetime.strptime(exp_date, "%Y-%m-%d").date()
                     if exp_date_dt < today:
@@ -210,8 +308,9 @@ class MainFrame(tk.Frame):
                 except:
                     status_image, row_tag = self.status_unknown, 'status_unknown'
 
+                weight_display = f"{weight:.2f} {weight_unit}" if weight is not None and weight != "" else ""
                 self.tree.insert("", tk.END, iid=item_id, image=status_image,
-                                 values=(name, qty, exp_date, category), tags=(row_tag,))
+                                 values=(name, qty, weight_display, exp_date, category), tags=(row_tag,))
         self.update_title_label()
 
     def sort_column(self, col, reverse):
@@ -237,7 +336,7 @@ class MainFrame(tk.Frame):
         with sqlite3.connect('produkti.db') as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT name, quantity, exp_date, category FROM Inventory WHERE id=? AND user_id=?",
+                "SELECT name, quantity, exp_date, category, weight, weight_unit FROM Inventory WHERE id=? AND user_id=?",
                 (item_id, self.controller.current_user_id)
             )
             row = cursor.fetchone()
@@ -246,7 +345,16 @@ class MainFrame(tk.Frame):
             messagebox.showerror("Kļūda", "Izvēlētais produkts netika atrasts.")
             return
 
-        AddProductWindow(self, item_id=item_id, name=row[0], qty=row[1], exp=row[2], cat=row[3])
+        AddProductWindow(
+            self,
+            item_id=item_id,
+            name=row[0],
+            qty=row[1],
+            exp=row[2],
+            cat=row[3],
+            weight=row[4] if row[4] is not None else "",
+            unit=row[5] or "g"
+        )
 
     def delete_product(self):
         selected = self.tree.selection()
@@ -277,19 +385,19 @@ class MainFrame(tk.Frame):
                     continue
 
 class AddProductWindow(tk.Toplevel):
-    def __init__(self, parent, item_id=None, name="", qty="", exp="", cat=""):
+    def __init__(self, parent, item_id=None, name="", qty="", exp="", cat="", weight="", unit="g"):
         super().__init__(parent)
         self.parent = parent
         self.item_id = item_id
         self.title("Rediģēt produktu" if item_id else "Pievienot produktu")
-        center_window(self, 400, 500)
+        center_window(self, 400, 560)
         container = tk.Frame(self, padx=30, pady=20)
         container.pack(fill="both", expand=True)
         self.transient(self.parent)
         self.grab_set()
         self.focus_force()
 
-        tk.Label(container, text="PRODUKTA NOSAUKUMS").pack(anchor="w")
+        tk.Label(container, text="PRODUKTA NOSAUKUMS *").pack(anchor="w")
         self.name_var = tk.StringVar(value=name)
         self.name_var.trace_add("write", lambda *args: self.name_var.set(self.name_var.get().upper()))
 
@@ -297,16 +405,28 @@ class AddProductWindow(tk.Toplevel):
         self.combo_name['values'] = self.get_product_name_options()
         self.combo_name.pack(fill="x", pady=5)
 
-        tk.Label(container, text="KATEGORIJA").pack(anchor="w", pady=(10,0))
+        tk.Label(container, text="KATEGORIJA *").pack(anchor="w", pady=(10,0))
         self.cat_var = tk.StringVar(value=cat)
         self.cat_var.trace_add("write", lambda *args: self.cat_var.set(self.cat_var.get().upper()))
         self.combo = ttk.Combobox(container, textvariable=self.cat_var, font=("Arial", 11))
         self.combo['values'] = ("LEDUSSKAPIS", "PLAUKTS", "SALDĒTAVA", "CITS")
         self.combo.pack(fill="x", pady=5)
-        tk.Label(container, text="DAUDZUMS").pack(anchor="w", pady=(10,0))
+
+        tk.Label(container, text="DAUDZUMS *").pack(anchor="w", pady=(10,0))
         self.e_qty = tk.Entry(container, font=("Arial", 11))
         self.e_qty.pack(fill="x", pady=5)
         self.e_qty.insert(0, qty)
+
+        tk.Label(container, text="SVARS").pack(anchor="w", pady=(10,0))
+        weight_frame = tk.Frame(container)
+        weight_frame.pack(fill="x", pady=5)
+        self.e_weight = tk.Entry(weight_frame, font=("Arial", 11), width=20)
+        self.e_weight.pack(side="left", fill="x", expand=True)
+        self.e_weight.insert(0, weight)
+        self.unit_var = tk.StringVar(value=unit or "g")
+        self.combo_weight_unit = ttk.Combobox(weight_frame, textvariable=self.unit_var, values=("G", "KG", "LB", "OZ", "L", "ML"), width=8, font=("Arial", 11), state="readonly")
+        self.combo_weight_unit.pack(side="left", padx=(10, 0))
+
         tk.Label(container, text="TERMIŅŠ (GGGG-MM-DD)").pack(anchor="w", pady=(10,0))
         self.e_exp = tk.Entry(container, font=("Arial", 11))
         self.e_exp.pack(fill="x", pady=5)
@@ -339,11 +459,23 @@ class AddProductWindow(tk.Toplevel):
         name = self.name_var.get().strip().upper()
         qty = self.e_qty.get().strip()
         cat = self.cat_var.get().strip()
+        weight = self.e_weight.get().strip()
+        unit = self.unit_var.get().strip()
         exp = self.e_exp.get().strip()
 
         if not name or not qty or not cat:
-            messagebox.showwarning("Brīdinājums", "Lūdzu, aizpildi visus laukus!")
+            messagebox.showwarning("Brīdinājums", "Lūdzu, aizpildi obligātos laukus ar *!")
             return False
+
+        if weight:
+            try:
+                weight_value = float(weight.replace(',', '.'))
+            except ValueError:
+                messagebox.showwarning("Brīdinājums", "Svars jāievada ar skaitli vai atstājams tukšs.")
+                return False
+        else:
+            weight_value = None
+            unit = ""
 
         if not exp:
             with sqlite3.connect('produkti.db') as conn:
@@ -357,13 +489,15 @@ class AddProductWindow(tk.Toplevel):
             cursor = conn.cursor()
             if self.item_id:
                 cursor.execute(
-                    "UPDATE Inventory SET name=?, category=?, quantity=?, exp_date=? WHERE id=? AND user_id=?",
-                    (name, cat, qty, exp, self.item_id, self.parent.controller.current_user_id)
+                    "UPDATE Inventory SET name=?, category=?, quantity=?, exp_date=?, weight=?, weight_unit=? WHERE id=? AND user_id=?",
+                    (name, cat, qty, exp, weight_value, unit, self.item_id, self.parent.controller.current_user_id)
                 )
                 messagebox.showinfo("Veiksmīgi", "Produkts veiksmīgi rediģēts!")
             else:
-                cursor.execute("INSERT INTO Inventory (user_id, name, category, quantity, exp_date) VALUES (?,?,?,?,?)",
-                               (self.parent.controller.current_user_id, name, cat, qty, exp))
+                cursor.execute(
+                    "INSERT INTO Inventory (user_id, name, category, quantity, exp_date, weight, weight_unit) VALUES (?,?,?,?,?,?,?)",
+                    (self.parent.controller.current_user_id, name, cat, qty, exp, weight_value, unit)
+                )
                 messagebox.showinfo("Veiksmīgi", "Produkts veiksmīgi pievienots!")
         return True
 
